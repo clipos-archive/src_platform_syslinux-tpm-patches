@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Letan <clipos@ssi.gouv.fr>
+Date: Fri, 9 Dec 2016 10:39:51 +0100
+Subject: [PATCH 3/4] tpm: Measure the kernel and its initramfs
+
+We reuse a previously introduced function in order to measure both the
+kernel (PCR #9) and its initramfs (PCR #10).
+---
+ com32/elflink/ldlinux/kernel.c          | 3 +++
+ com32/lib/syslinux/initramfs_archive.c  | 4 ++++
+ com32/lib/syslinux/initramfs_loadfile.c | 6 +++++-
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/com32/elflink/ldlinux/kernel.c b/com32/elflink/ldlinux/kernel.c
+index f3ba37fa..38a7934b 100644
+--- a/com32/elflink/ldlinux/kernel.c
++++ b/com32/elflink/ldlinux/kernel.c
+@@ -7,6 +7,7 @@
+ #include <syslinux/loadfile.h>
+ #include <syslinux/linux.h>
+ #include <syslinux/pxe.h>
++#include <tpm.h>
+ #include "core.h"
+
+ const char *globaldefault = NULL;
+@@ -69,6 +70,8 @@ int new_linux_kernel(char *okernel, char *ocmdline)
+ 		goto bail;
+ 	}
+
++	tpm_hash_and_extend_buffer(9, kernel_len, kernel_data);
++
+ 	if (!opt_quiet)
+ 		printf("ok\n");
+
+diff --git a/com32/lib/syslinux/initramfs_archive.c b/com32/lib/syslinux/initramfs_archive.c
+index 495b78e3..8abec5a6 100644
+--- a/com32/lib/syslinux/initramfs_archive.c
++++ b/com32/lib/syslinux/initramfs_archive.c
+@@ -34,6 +34,7 @@
+ #include <stdlib.h>
+ #include <syslinux/loadfile.h>
+ #include <syslinux/linux.h>
++#include <tpm.h>
+
+ int initramfs_load_archive(struct initramfs *ihead, const char *filename)
+ {
+@@ -43,5 +44,8 @@ int initramfs_load_archive(struct initramfs *ihead, const char *filename)
+     if (loadfile(filename, &data, &len))
+ 	return -1;
+
++	// measure the initramfs and extend pcr 10
++	tpm_hash_and_extend_buffer(10, len, data);
++
+     return initramfs_add_data(ihead, data, len, len, 4);
+ }
+diff --git a/com32/lib/syslinux/initramfs_loadfile.c b/com32/lib/syslinux/initramfs_loadfile.c
+index 1338aade..3df35192 100644
+--- a/com32/lib/syslinux/initramfs_loadfile.c
++++ b/com32/lib/syslinux/initramfs_loadfile.c
+@@ -33,6 +33,7 @@
+
+ #include <syslinux/linux.h>
+ #include <syslinux/loadfile.h>
++#include <tpm.h>
+
+ int initramfs_load_file(struct initramfs *ihead, const char *src_filename,
+ 			const char *dst_filename, int do_mkdir, uint32_t mode)
+@@ -43,7 +44,9 @@ int initramfs_load_file(struct initramfs *ihead, const char *src_filename,
+     if (loadfile(src_filename, &data, &len))
+ 	return -1;
+
+-    return initramfs_add_file(ihead, data, len, len, dst_filename,
++	// measure the initramfs and extend pcr 10
++	tpm_hash_and_extend_buffer(10, len, data);
++
++	return initramfs_add_file(ihead, data, len, len, dst_filename,
+ 			      do_mkdir, mode);
+ }
+--
+2.19.0

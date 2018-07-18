@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Letan <clipos@ssi.gouv.fr>
+Date: Fri, 9 Dec 2016 10:25:21 +0100
+Subject: [PATCH 2/4] tpm: Extend 8th PCR with Syslinux ELF modules
+
+Syslinux is a modular bootloader, and therefore dynamically loads
+executable code. Nothing prevents an attacker to modify these modules,
+and there we need to measure them the same way Syslinux core is itself
+measured by the BIOS.
+
+Because the filesystem interface does not provide an easy way to move
+backward in a file, the requested image is load a first time in memory
+to be measured.
+---
+ com32/lib/sys/module/common.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/com32/lib/sys/module/common.c b/com32/lib/sys/module/common.c
+index 05a27e85..95bd06ad 100644
+--- a/com32/lib/sys/module/common.c
++++ b/com32/lib/sys/module/common.c
+@@ -13,6 +13,8 @@
+ #include <linux/list.h>
+ #include <sys/module.h>
+ 
++#include <tpm.h>
++
+ #include "elfutils.h"
+ #include "common.h"
+ 
+@@ -92,6 +94,24 @@ FILE *findpath(char *name)
+ 
+ int image_load(struct elf_module *module)
+ {
++	// we load it a first time in order to get a hash of it
++	char *mod_buffer;
++	size_t res = 0;
++	size_t buff_size = TPM_DEFAULT_BUFFER_SIZE;
++	FILE *mod = findpath(module->name);
++
++	mod_buffer = malloc (buff_size);
++
++	do {
++		res = fread(mod_buffer, 1, buff_size, mod);
++		tpm_hash_and_extend_buffer(8, res, (void *)mod_buffer);
++	} while (res == buff_size);
++
++	free(mod_buffer);
++
++	fclose(mod);
++
++	// we now come back to the legit control flow
+ 	module->u.l._file = findpath(module->name);
+ 
+ 	if (module->u.l._file == NULL) {
+-- 
+2.19.0
+

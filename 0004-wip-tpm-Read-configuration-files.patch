@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Letan <clipos@ssi.gouv.fr>
+Date: Fri, 9 Dec 2016 10:38:40 +0100
+Subject: [PATCH 4/4] wip(tpm): Read configuration files
+
+Syslinux is a configurable bootloader, and therefore loads
+configuration files which determine its behavior. In practice, these
+configuration files may contain information that defines the behavior
+of the loaded kernel (e.g. kernel command line arguments).
+
+As a consequence, this patch enables the measurement of the
+configuration files loaded by syslinux during the boot sequence.
+
+/!\ This patch is a work in progress. Not all configuration files may
+    be measured in its current state.
+---
+ com32/elflink/ldlinux/readconfig.c | 44 ++++++++++++++++++++++++------
+ com32/menu/readconfig.c            | 23 ++++++++++++++++
+ 2 files changed, 59 insertions(+), 8 deletions(-)
+
+diff --git a/com32/elflink/ldlinux/readconfig.c b/com32/elflink/ldlinux/readconfig.c
+index 3d6aa27e..3cd2e514 100644
+--- a/com32/elflink/ldlinux/readconfig.c
++++ b/com32/elflink/ldlinux/readconfig.c
+@@ -31,6 +31,8 @@
+ #include <fs.h>
+ #include <syslinux/pxe_api.h>
+ 
++#include <tpm.h>
++
+ #include "menu.h"
+ #include "config.h"
+ #include "getkey.h"
+@@ -122,6 +124,37 @@ static const struct messages messages[MSG_COUNT] = {
+                       if ( __p ) memcpy(__p, __x, __n); \
+                       __p; })
+ 
++int get_fd_config(const char *filename, int measured) {
++	int fd;
++
++	if (!filename) {
++		fd = open_config();
++	} else {
++		fd = open(filename, O_RDONLY);
++	}
++
++	if (fd < 0) {
++		return fd;
++	}
++
++	if (!measured) {
++		char buffer[TPM_DEFAULT_BUFFER_SIZE];
++		int res = 0;
++
++		do {
++			res = read(fd, &buffer, sizeof(buffer));
++			tpm_hash_and_extend_buffer(11, res, &buffer);
++		} while (res == sizeof(buffer));
++
++		close(fd);
++
++		fd = get_fd_config(filename, 1);
++	}
++
++	return fd;
++}
++
++
+ /*
+  * Search the list of all menus for a specific label
+  */
+@@ -823,7 +856,7 @@ static void do_include_menu(char *str, struct menu *m)
+     file = refdup_word(&p);
+     p = skipspace(p);
+ 
+-    fd = open(file, O_RDONLY);
++    fd = get_fd_config(file, 0);
+     if (fd < 0)
+ 	goto put;
+ 
+@@ -860,7 +893,7 @@ static void do_include(char *str)
+     p = skipspace(str);
+     file = refdup_word(&p);
+ 
+-    fd = open(file, O_RDONLY);
++    fd = get_fd_config(file, 0);
+     if (fd < 0)
+ 	goto put;
+ 
+@@ -1437,12 +1470,7 @@ static int parse_main_config(const char *filename)
+ {
+ 	const char *mode = "r";
+ 	FILE *f;
+-	int fd;
+-
+-	if (!filename)
+-		fd = open_config();
+-	else
+-		fd = open(filename, O_RDONLY);
++	int fd = get_fd_config(filename, 0);
+ 
+ 	if (fd < 0)
+ 		return fd;
+diff --git a/com32/menu/readconfig.c b/com32/menu/readconfig.c
+index a433fadb..18e92eda 100644
+--- a/com32/menu/readconfig.c
++++ b/com32/menu/readconfig.c
+@@ -23,6 +23,8 @@
+ #include <com32.h>
+ #include <syslinux/adv.h>
+ #include <syslinux/config.h>
++#include <fcntl.h>
++#include <tpm.h>
+ 
+ #include "menu.h"
+ 
+@@ -1060,6 +1062,27 @@ do_include:
+     }
+ }
+ 
++FILE *measure_and_fopen(const char *filename) {
++	int fd;
++	char buffer[TPM_DEFAULT_BUFFER_SIZE];
++	int res = 0;
++
++	fd = open(filename, O_RDONLY);
++
++	if (fd < 0) {
++		return NULL;
++	}
++
++	do {
++		res = read(fd, &buffer, sizeof(buffer));
++		tpm_hash_and_extend_buffer(11, res, &buffer);
++	} while (res == sizeof(buffer));
++
++	close(fd);
++
++	return fopen(filename, "r");
++}
++
+ static int parse_one_config(const char *filename)
+ {
+     FILE *f;
+-- 
+2.19.0
+
